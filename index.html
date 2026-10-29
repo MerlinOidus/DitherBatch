@@ -16,6 +16,7 @@
   --bg:#16181a; --panel:#1f2224; --ink:#ecebe6; --muted:#9a9a94; --line:#33373a;
   --accent:#6cc070; --accent-ink:#0d1a0e; --chalk:#223024; --warn:#ff8a80; color-scheme:dark;}}
 *{box-sizing:border-box}
+[hidden]{display:none!important}
 body{margin:0;background:var(--bg);color:var(--ink);font:14px/1.45 var(--sans);
   padding:20px max(16px,env(safe-area-inset-left,0px)) 40px max(16px,env(safe-area-inset-right,0px))}
 h1{font:700 22px/1.2 var(--mono);margin:0;letter-spacing:.02em}
@@ -158,6 +159,7 @@ canvas{max-width:100%;height:auto;image-rendering:pixelated;display:block}
         <span class="val">×</span>
         <input type="number" id="outH" min="1" max="8192" value="1080" aria-label="Tinggi">
       </div>
+      <label class="check" id="fitRow"><input type="checkbox" id="fit" checked> Jaga proporsi (tidak gepeng, sisanya transparan)</label>
       <div class="status" id="sizeInfo"></div>
     </div>
     <label class="check"><input type="checkbox" id="suffix"> Tambah "_dither" ke nama file</label>
@@ -225,7 +227,7 @@ const ctrls = ['algo','palette','levels','px','strength','bright','contrast','al
 function settings(){
   return {algo:$('algo').value, palette:$('palette').value, levels:+$('levels').value, px:+$('px').value,
     strength:+$('strength').value, bright:+$('bright').value, contrast:+$('contrast').value, alpha:+$('alpha').value,
-    outSize:$('outSize').value, outW:Math.max(1,+$('outW').value||1920), outH:Math.max(1,+$('outH').value||1080)};
+    fit:$('fit').checked, outSize:$('outSize').value, outW:Math.max(1,+$('outW').value||1920), outH:Math.max(1,+$('outH').value||1080)};
 }
 function applyPreset(name){
   const p = PRESETS[name]; if(!p) return;
@@ -456,7 +458,10 @@ function processFrame(src, s){
   const out=document.createElement('canvas');
   const [ow,oh]=outDims(s,W,H,w,h); out.width=ow; out.height=oh;
   const oc=out.getContext('2d'); oc.imageSmoothingEnabled=false;
-  oc.drawImage(work,0,0,out.width,out.height);
+  if(s.fit && s.outSize!=='orig' && s.outSize!=='small'){
+    const sc=Math.min(ow/w,oh/h), dw=Math.round(w*sc), dh=Math.round(h*sc);
+    oc.drawImage(work,Math.round((ow-dw)/2),Math.round((oh-dh)/2),dw,dh);
+  } else oc.drawImage(work,0,0,ow,oh);
   return out;
 }
 
@@ -526,7 +531,10 @@ document.addEventListener('drop',e=>{ e.preventDefault(); if(e.target!==drop && 
 
 $('preset').addEventListener('change',e=>{ applyPreset(e.target.value); schedule(); });
 for(const k of ctrls){ $(k).addEventListener('input',()=>{ $('preset').value='custom'; refreshLabels(); schedule(); }); }
-$('outSize').addEventListener('change',()=>{ $('customSize').hidden=$('outSize').value!=='custom'; schedule(); });
+function syncSizeUi(){ const v=$('outSize').value; $('customSize').hidden=v!=='custom'; $('fitRow').hidden=(v==='orig'||v==='small'); }
+$('outSize').addEventListener('change',()=>{ syncSizeUi(); schedule(); });
+$('fit').addEventListener('change',schedule);
+syncSizeUi();
 ['outW','outH'].forEach(id=>$(id).addEventListener('input',schedule));
 $('loadPal').addEventListener('click',()=>$('palInput').click());
 $('palInput').addEventListener('change',e=>{ loadPaletteFiles([...e.target.files]); e.target.value=''; });
