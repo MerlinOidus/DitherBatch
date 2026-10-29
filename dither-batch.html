@@ -1,0 +1,667 @@
+<!doctype html>
+<html lang="id">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Dither Batch</title>
+<style>
+:root{
+  --bg:#f3f1ec; --panel:#fffdf8; --ink:#1d1b26; --muted:#6c6878; --line:#ddd8cf;
+  --accent:#2f7d32; --accent-ink:#fff; --chalk:#e8f0e3; --warn:#b3261e;
+  --mono:"Consolas","Menlo","DejaVu Sans Mono",monospace;
+  --sans:system-ui,"Segoe UI",Roboto,sans-serif;
+  color-scheme:light;
+}
+@media (prefers-color-scheme:dark){:root{
+  --bg:#16181a; --panel:#1f2224; --ink:#ecebe6; --muted:#9a9a94; --line:#33373a;
+  --accent:#6cc070; --accent-ink:#0d1a0e; --chalk:#223024; --warn:#ff8a80; color-scheme:dark;}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:14px/1.45 var(--sans);
+  padding:20px max(16px,env(safe-area-inset-left,0px)) 40px max(16px,env(safe-area-inset-right,0px))}
+h1{font:700 22px/1.2 var(--mono);margin:0;letter-spacing:.02em}
+header{display:flex;flex-wrap:wrap;gap:8px 16px;align-items:baseline;margin-bottom:16px}
+header p{margin:0;color:var(--muted)}
+.app{display:grid;grid-template-columns:300px 1fr;gap:16px;align-items:start}
+@media (max-width:820px){.app{grid-template-columns:1fr}}
+.panel{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:14px;display:flex;flex-direction:column;gap:12px}
+.label{font:600 11px/1 var(--mono);text-transform:uppercase;letter-spacing:.08em;color:var(--muted)}
+.row{display:flex;flex-direction:column;gap:6px}
+.row>div{display:flex;justify-content:space-between;align-items:center;gap:8px}
+.val{font:12px var(--mono);font-variant-numeric:tabular-nums;color:var(--ink)}
+select,input[type=number]{width:100%;padding:7px 8px;border:1px solid var(--line);border-radius:6px;background:var(--bg);color:var(--ink);font:inherit}
+input[type=range]{width:100%;accent-color:var(--accent)}
+label.check{display:flex;gap:8px;align-items:center;cursor:pointer}
+input[type=checkbox]{accent-color:var(--accent);width:16px;height:16px}
+button{font:600 14px var(--sans);padding:9px 12px;border-radius:6px;border:1px solid var(--line);background:var(--bg);color:var(--ink);cursor:pointer}
+button.primary{background:var(--accent);color:var(--accent-ink);border-color:var(--accent)}
+button:disabled{opacity:.45;cursor:not-allowed}
+button:focus-visible,select:focus-visible,input:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.drop{border:2px dashed var(--line);border-radius:8px;padding:14px;text-align:center;color:var(--muted);cursor:pointer}
+.drop.over{border-color:var(--accent);background:var(--chalk);color:var(--ink)}
+.drop strong{color:var(--ink)}
+.btns{display:flex;gap:8px;flex-wrap:wrap}
+.btns button{flex:1 1 auto}
+.view{display:flex;flex-direction:column;gap:12px;min-width:0}
+.stage{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+@media (max-width:560px){.stage{grid-template-columns:1fr}}
+.frame{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:10px;display:flex;flex-direction:column;gap:8px;min-width:0}
+.checker{background-color:#cfcfcf;background-image:linear-gradient(45deg,#eee 25%,transparent 25%,transparent 75%,#eee 75%),linear-gradient(45deg,#eee 25%,transparent 25%,transparent 75%,#eee 75%);background-size:16px 16px;background-position:0 0,8px 8px;border-radius:4px;display:flex;justify-content:center;align-items:center;min-height:160px;overflow:hidden}
+canvas{max-width:100%;height:auto;image-rendering:pixelated;display:block}
+.timeline{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:10px 14px;display:flex;flex-wrap:wrap;gap:10px;align-items:center}
+.timeline input[type=range]{flex:1 1 200px}
+.timeline .name{font:12px var(--mono);color:var(--muted);min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1 1 160px}
+.fps{display:flex;align-items:center;gap:6px}.fps input{width:72px}
+.range button{padding:7px 10px;font-size:13px}
+.range .name{flex-basis:100%}
+.progress{height:8px;background:var(--line);border-radius:4px;overflow:hidden}
+.progress>i{display:block;height:100%;width:0;background:var(--accent);transition:width .1s}
+.status{font:12px var(--mono);color:var(--muted)}
+.status.err{color:var(--warn)}
+.hint{color:var(--muted);font-size:12px;margin:0}
+.custom{border-top:1px solid var(--line);border-bottom:1px solid var(--line);padding-block:12px}
+.row>.swatches{display:flex;flex-wrap:wrap;gap:2px;justify-content:flex-start}
+.row>.status{display:block}
+.swatches i{width:14px;height:14px;border-radius:2px;box-shadow:inset 0 0 0 1px rgba(127,127,127,.35)}
+</style>
+</head>
+<body>
+<header>
+  <h1>DITHER BATCH</h1>
+  <p>Masukkan semua frame sekaligus, atur sekali, simpan semuanya. Semua diproses di komputermu sendiri.</p>
+</header>
+
+<div class="app">
+  <aside class="panel">
+    <div class="drop" id="drop" tabindex="0" role="button" aria-label="Pilih atau taruh file gambar">
+      <strong>Taruh frame di sini</strong><br>atau klik untuk pilih file (PNG/JPG)
+      <input type="file" id="fileInput" accept="image/*" multiple hidden>
+    </div>
+    <div class="btns">
+      <button id="folderBtn" type="button">Pilih folder</button>
+      <input type="file" id="folderInput" webkitdirectory multiple hidden>
+    </div>
+    <div class="status" id="countInfo">Belum ada frame (preview pakai gambar contoh)</div>
+
+    <div class="row"><span class="label">Preset</span>
+      <select id="preset">
+        <option value="baldi">Baldi crunchy (default)</option>
+        <option value="mono">1-bit hitam putih</option>
+        <option value="gb">Game Boy hijau</option>
+        <option value="soft">Halus, warna banyak</option>
+        <option value="custom">Custom</option>
+      </select>
+    </div>
+
+    <div class="row"><span class="label">Metode dither</span>
+      <select id="algo">
+        <option value="bayer2">Bayer 2×2 (kotak kasar)</option>
+        <option value="bayer4">Bayer 4×4 (klasik)</option>
+        <option value="bayer8">Bayer 8×8 (halus)</option>
+        <option value="floyd">Floyd–Steinberg (bintik)</option>
+        <option value="atkinson">Atkinson (Mac lama)</option>
+        <option value="none">Tanpa dither (posterize)</option>
+      </select>
+    </div>
+
+    <div class="row"><span class="label">Palet warna</span>
+      <select id="palette">
+        <option value="levels">Warna asli, dikurangi</option>
+        <option value="mono">Hitam putih</option>
+        <option value="gray4">Abu-abu 4 tingkat</option>
+        <option value="gb">Game Boy</option>
+        <option value="pico">PICO-8 (16 warna)</option>
+        <option value="cga">CGA (4 warna)</option>
+        <optgroup label="Palet sendiri" id="customGroup"></optgroup>
+      </select>
+    </div>
+
+    <div class="row custom">
+      <span class="label">Palet sendiri</span>
+      <button id="loadPal" type="button">Muat file palet (PNG)</button>
+      <input type="file" id="palInput" accept="image/*" multiple hidden>
+      <div><span class="label">Jumlah warna dari frame</span><span class="val" id="nColVal"></span></div>
+      <input type="range" id="nCol" min="4" max="256" step="4" value="32">
+      <button id="extractBtn" type="button">Ambil palet dari frame ini</button>
+      <div class="swatches" id="swatches"></div>
+      <div class="status" id="palInfo"></div>
+      <button id="savePal" type="button" hidden>Simpan palet jadi PNG</button>
+    </div>
+
+    <div class="row" id="levelsRow"><div><span class="label">Tingkat warna / kanal</span><span class="val" id="levelsVal"></span></div>
+      <input type="range" id="levels" min="2" max="8" step="1"></div>
+
+    <div class="row"><div><span class="label">Ukuran pixel</span><span class="val" id="pxVal"></span></div>
+      <input type="range" id="px" min="1" max="8" step="1"></div>
+
+    <div class="row"><div><span class="label">Kekuatan dither</span><span class="val" id="strengthVal"></span></div>
+      <input type="range" id="strength" min="0" max="1.5" step="0.05"></div>
+
+    <div class="row"><div><span class="label">Kecerahan</span><span class="val" id="brightVal"></span></div>
+      <input type="range" id="bright" min="-80" max="80" step="1"></div>
+
+    <div class="row"><div><span class="label">Kontras</span><span class="val" id="contrastVal"></span></div>
+      <input type="range" id="contrast" min="0.5" max="2" step="0.05"></div>
+
+    <div class="row"><div><span class="label">Batas transparan</span><span class="val" id="alphaVal"></span></div>
+      <input type="range" id="alpha" min="0" max="255" step="1"></div>
+
+    <div class="row"><span class="label">Ukuran hasil</span>
+      <select id="outSize">
+        <option value="orig">Sama dengan asli</option>
+        <option value="1080" selected>1920 × 1080 (1080p)</option>
+        <option value="720">1280 × 720 (720p)</option>
+        <option value="small">Kecil (ukuran setelah pixel)</option>
+        <option value="custom">Custom</option>
+      </select>
+      <div id="customSize" hidden>
+        <input type="number" id="outW" min="1" max="8192" value="1920" aria-label="Lebar">
+        <span class="val">×</span>
+        <input type="number" id="outH" min="1" max="8192" value="1080" aria-label="Tinggi">
+      </div>
+      <div class="status" id="sizeInfo"></div>
+    </div>
+    <label class="check"><input type="checkbox" id="suffix"> Tambah "_dither" ke nama file</label>
+  </aside>
+
+  <section class="view">
+    <div class="stage">
+      <div class="frame"><span class="label">Asli</span><div class="checker"><canvas id="cOrig"></canvas></div></div>
+      <div class="frame"><span class="label">Dither</span><div class="checker"><canvas id="cOut"></canvas></div></div>
+    </div>
+
+    <div class="timeline">
+      <button id="playBtn" type="button" aria-label="Putar animasi">▶ Putar</button>
+      <input type="range" id="frameSlider" min="0" max="0" value="0" aria-label="Pilih frame">
+      <span class="name" id="frameName">contoh</span>
+      <span class="fps"><span class="label">FPS</span><input type="number" id="fps" min="1" max="60" value="24"></span>
+    </div>
+
+    <div class="timeline range">
+      <span class="label">Rentang frame</span>
+      <span class="fps"><label for="rFrom">Dari</label><input type="number" id="rFrom" min="1" value="1"></span>
+      <button id="setFrom" type="button">Awal = frame ini</button>
+      <span class="fps"><label for="rTo">Sampai</label><input type="number" id="rTo" min="1" value="1"></span>
+      <button id="setTo" type="button">Akhir = frame ini</button>
+      <button id="rAll" type="button">Semua</button>
+      <span class="name" id="rInfo"></span>
+    </div>
+
+    <div class="panel">
+      <span class="label">Simpan semua frame</span>
+      <div class="btns">
+        <button class="primary" id="saveFolder" type="button" disabled>Simpan ke folder</button>
+        <button id="saveZip" type="button" disabled>Download ZIP</button>
+        <button id="cancelBtn" type="button" hidden>Batal</button>
+      </div>
+      <button id="saveOne" type="button">Simpan frame ini saja (PNG, cocok untuk thumbnail)</button>
+      <div class="progress"><i id="bar"></i></div>
+      <div class="status" id="status">Masukkan frame dulu untuk mulai.</div>
+      <p class="hint">"Simpan ke folder" langsung menulis PNG ke folder pilihanmu (Chrome/Edge). Kalau tidak bisa, pakai "Download ZIP".</p>
+    </div>
+  </section>
+</div>
+
+<script>
+(() => {
+const $ = id => document.getElementById(id);
+
+/* ---------- presets & palettes ---------- */
+const PRESETS = {
+  baldi:  {algo:'floyd',  palette:'levels', levels:4, px:2, strength:1,   bright:0, contrast:1.1, alpha:128},
+  mono:   {algo:'bayer4', palette:'mono',   levels:2, px:2, strength:1,   bright:0, contrast:1.2, alpha:128},
+  gb:     {algo:'bayer4', palette:'gb',     levels:4, px:3, strength:1,   bright:0, contrast:1.1, alpha:128},
+  soft:   {algo:'bayer8', palette:'levels', levels:6, px:1, strength:0.8, bright:0, contrast:1,   alpha:128},
+};
+const hex = s => [parseInt(s.slice(0,2),16),parseInt(s.slice(2,4),16),parseInt(s.slice(4,6),16)];
+const PALETTES = {
+  mono:  {gray:true, step:255, cols:['000000','ffffff'].map(hex)},
+  gray4: {gray:true, step:85,  cols:['000000','555555','aaaaaa','ffffff'].map(hex)},
+  gb:    {gray:true, step:85,  cols:['0f380f','306230','8bac0f','9bbc0f'].map(hex)},
+  cga:   {gray:false,step:128, cols:['000000','55ffff','ff55ff','ffffff'].map(hex)},
+  pico:  {gray:false,step:70,  cols:['000000','1d2b53','7e2553','008751','ab5236','5f574f','c2c3c7','fff1e8','ff004d','ffa300','ffec27','00e436','29adff','83769c','ff77a8','ffccaa'].map(hex)},
+};
+
+const ctrls = ['algo','palette','levels','px','strength','bright','contrast','alpha'];
+function settings(){
+  return {algo:$('algo').value, palette:$('palette').value, levels:+$('levels').value, px:+$('px').value,
+    strength:+$('strength').value, bright:+$('bright').value, contrast:+$('contrast').value, alpha:+$('alpha').value,
+    outSize:$('outSize').value, outW:Math.max(1,+$('outW').value||1920), outH:Math.max(1,+$('outH').value||1080)};
+}
+function applyPreset(name){
+  const p = PRESETS[name]; if(!p) return;
+  for(const k of ctrls) $(k).value = p[k];
+  refreshLabels();
+}
+function refreshLabels(){
+  $('levelsVal').textContent = $('levels').value;
+  $('pxVal').textContent = $('px').value + ' px';
+  $('strengthVal').textContent = Math.round($('strength').value*100) + '%';
+  $('brightVal').textContent = $('bright').value;
+  $('contrastVal').textContent = (+$('contrast').value).toFixed(2) + '×';
+  $('alphaVal').textContent = $('alpha').value;
+  $('levelsRow').hidden = $('palette').value !== 'levels';
+  $('nColVal').textContent = $('nCol').value;
+  renderSwatches();
+}
+
+/* ---------- dither core ---------- */
+function bayerMatrix(n){
+  let m=[[0,2],[3,1]];
+  while(m.length<n){
+    const s=m.length, r=[];
+    for(let y=0;y<s*2;y++){ r[y]=[]; for(let x=0;x<s*2;x++)
+      r[y][x]=4*m[y%s][x%s]+[[0,2],[3,1]][Math.floor(y/s)][Math.floor(x/s)]; }
+    m=r;
+  }
+  const N=n*n; return m.map(row=>row.map(v=>(v+0.5)/N-0.5));
+}
+const BAYER = {bayer2:bayerMatrix(2), bayer4:bayerMatrix(4), bayer8:bayerMatrix(8)};
+
+function makeQuantizer(s){
+  if(s.palette==='levels'){
+    const n=s.levels, step=255/(n-1);
+    return {step, gray:false, q:(r,g,b,o)=>{
+      o[0]=Math.round(Math.min(255,Math.max(0,r))/step)*step;
+      o[1]=Math.round(Math.min(255,Math.max(0,g))/step)*step;
+      o[2]=Math.round(Math.min(255,Math.max(0,b))/step)*step; }};
+  }
+  const P=PALETTES[s.palette], cols=P.cols;
+  // gray palettes: map by brightness order (works for Game Boy greens too)
+  if(P.gray){
+    const lum=c=>0.299*c[0]+0.587*c[1]+0.114*c[2];
+    const sorted=[...cols].sort((a,b)=>lum(a)-lum(b)), n=sorted.length, step=255/(n-1);
+    return {step, gray:true, q:(r,g,b,o)=>{
+      const l=Math.min(255,Math.max(0,r)); const c=sorted[Math.round(l/step)];
+      o[0]=c[0];o[1]=c[1];o[2]=c[2]; o[3]=Math.round(l/step)*step; }};
+  }
+  if(!P.lut) P.lut=new Int16Array(262144).fill(-1);   // 6-bit-per-channel lookup cache
+  const lut=P.lut;
+  return {step:P.step, gray:false, q:(r,g,b,o)=>{
+    r=r<0?0:r>255?255:r|0; g=g<0?0:g>255?255:g|0; b=b<0?0:b>255?255:b|0;
+    const key=((r>>2)<<12)|((g>>2)<<6)|(b>>2);
+    let idx=lut[key];
+    if(idx<0){ idx=nearest(cols,(r&252)|2,(g&252)|2,(b&252)|2); lut[key]=idx; }
+    const c=cols[idx]; o[0]=c[0];o[1]=c[1];o[2]=c[2]; }};
+}
+function nearest(cols,r,g,b){
+  let best=0,bd=1e12;
+  for(let i=0;i<cols.length;i++){const c=cols[i];
+    const dr=r-c[0],dg=g-c[1],db=b-c[2]; const d=dr*dr*0.3+dg*dg*0.59+db*db*0.11;
+    if(d<bd){bd=d;best=i;}}
+  return best;
+}
+
+/* ---------- custom palettes ---------- */
+let palCounter=0;
+function paletteStep(cols){
+  if(cols.length<2) return 64;
+  let sum=0;
+  for(const a of cols){ let m=1e9; for(const b of cols){ if(a===b) continue;
+    const d=Math.hypot(a[0]-b[0],a[1]-b[1],a[2]-b[2]); if(d<m) m=d; } sum+=m; }
+  return Math.max(12,Math.min(160,(sum/cols.length)*1.3));
+}
+function addPalette(name, cols){
+  const key='custom'+(palCounter++);
+  PALETTES[key]={gray:false, step:paletteStep(cols), cols, name};
+  const opt=document.createElement('option'); opt.value=key; opt.textContent=`${name} (${cols.length} warna)`;
+  $('customGroup').appendChild(opt);
+  $('palette').value=key; $('preset').value='custom';
+  refreshLabels(); schedule();
+}
+function uniqueColors(data, thr){
+  const seen=new Map();
+  for(let p=0;p<data.length;p+=4){ if(data[p+3]<thr) continue;
+    const k=(data[p]<<16)|(data[p+1]<<8)|data[p+2]; if(!seen.has(k)) seen.set(k,[data[p],data[p+1],data[p+2]]); }
+  return [...seen.values()];
+}
+function collectPixels(data, thr){
+  let m=0; for(let p=3;p<data.length;p+=4) if(data[p]>=thr) m++;
+  const out=new Uint8Array(m*3);
+  for(let p=0,j=0;p<data.length;p+=4){ if(data[p+3]<thr) continue; out[j++]=data[p]; out[j++]=data[p+1]; out[j++]=data[p+2]; }
+  return out;
+}
+function medianCut(px, n){
+  const m=px.length/3; if(!m) return [];
+  const idx=new Uint32Array(m); for(let i=0;i<m;i++) idx[i]=i;
+  const info=(s,e)=>{ const mn=[255,255,255], mx=[0,0,0];
+    for(let k=s;k<e;k++){ const q=idx[k]*3; for(let c=0;c<3;c++){ const v=px[q+c]; if(v<mn[c])mn[c]=v; if(v>mx[c])mx[c]=v; } }
+    const rg=[(mx[0]-mn[0])*1.0,(mx[1]-mn[1])*1.2,(mx[2]-mn[2])*0.8]; const ch=rg.indexOf(Math.max(...rg));
+    return {s,e,ch,score:rg[ch]>0?rg[ch]*Math.sqrt(e-s):0}; };
+  const boxes=[info(0,m)];
+  while(boxes.length<n){
+    let bi=-1,bv=0; boxes.forEach((b,i)=>{ if(b.e-b.s>1 && b.score>bv){bv=b.score;bi=i;} });
+    if(bi<0) break;
+    const b=boxes[bi], ch=b.ch;
+    idx.subarray(b.s,b.e).sort((x,y)=>px[x*3+ch]-px[y*3+ch]);
+    // split at the median, nudged to a spot where the value actually changes
+    const val=k=>px[idx[k]*3+ch];
+    let mid=(b.s+b.e)>>1;
+    if(val(mid-1)===val(mid)){
+      let up=mid; while(up<b.e && val(up)===val(mid-1)) up++;
+      let dn=mid; while(dn>b.s+1 && val(dn-1)===val(mid)) dn--;
+      mid = (up<b.e && (up-mid)<=(mid-dn) || dn<=b.s+1 && val(dn-1)===val(dn)) ? up : dn;
+      if(mid>=b.e) mid=dn;
+    }
+    boxes.splice(bi,1,info(b.s,mid),info(mid,b.e));
+  }
+  let cols=boxes.map(b=>{ let r=0,g=0,bl=0; for(let k=b.s;k<b.e;k++){ const q=idx[k]*3; r+=px[q]; g+=px[q+1]; bl+=px[q+2]; }
+    const c=b.e-b.s; return [r/c,g/c,bl/c]; });
+  const dedupe=list=>{ const u=new Map(); for(const c of list){ const r=c.map(Math.round); u.set(r.join(','),r); } return [...u.values()]; };
+  const base=dedupe(cols);
+  // refine with a few k-means passes on a sample
+  const step=Math.max(1,Math.floor(m/40000));
+  for(let it=0;it<4;it++){
+    const acc=cols.map(()=>[0,0,0,0]);
+    for(let i=0;i<m;i+=step){ const q=i*3; const k=nearest(cols,px[q],px[q+1],px[q+2]);
+      acc[k][0]+=px[q]; acc[k][1]+=px[q+1]; acc[k][2]+=px[q+2]; acc[k][3]++; }
+    cols=cols.map((c,k)=>acc[k][3]?[acc[k][0]/acc[k][3],acc[k][1]/acc[k][3],acc[k][2]/acc[k][3]]:c);
+  }
+  const refined=dedupe(cols);
+  return refined.length>=base.length ? refined : base;
+}
+function imageData(src, maxSide){
+  const sc=Math.min(1, maxSide/Math.max(src.width,src.height));
+  const c=document.createElement('canvas'); c.width=Math.max(1,Math.round(src.width*sc)); c.height=Math.max(1,Math.round(src.height*sc));
+  const x=c.getContext('2d',{willReadFrequently:true}); x.imageSmoothingEnabled=false; x.drawImage(src,0,0,c.width,c.height);
+  return x.getImageData(0,0,c.width,c.height).data;
+}
+async function loadPaletteFiles(list){
+  for(const f of list){
+    try{
+      const bmp=await createImageBitmap(f);
+      const data=imageData(bmp,1024); bmp.close&&bmp.close();
+      let cols=uniqueColors(data,128);
+      if(cols.length>256) cols=medianCut(collectPixels(data,128),256);
+      if(!cols.length){ $('palInfo').textContent=`${f.name}: tidak ada warna yang terbaca.`; continue; }
+      addPalette(f.name.replace(/\.[^.]+$/,''), cols);
+    }catch(e){ $('palInfo').textContent=`${f.name} tidak bisa dibuka sebagai gambar.`; }
+  }
+}
+async function extractFromCurrent(){
+  const n=+$('nCol').value, src=await getBitmap(current);
+  const px=collectPixels(imageData(src,600), +$('alpha').value||1);
+  if(!px.length){ $('palInfo').textContent='Frame ini kosong (semua transparan).'; return; }
+  $('palInfo').textContent='Menghitung palet...';
+  await new Promise(r=>setTimeout(r,20));
+  const cols=medianCut(px,n);
+  const label = files.length ? files[current].name.replace(/\.[^.]+$/,'') : `contoh ${current+1}`;
+  addPalette(label, cols);
+}
+function renderSwatches(){
+  const P=PALETTES[$('palette').value], box=$('swatches');
+  box.innerHTML='';
+  if(!P){ $('palInfo').textContent='Pilih palet di atas, muat file palet, atau ambil dari frame.'; $('savePal').hidden=true; return; }
+  for(const c of P.cols){ const i=document.createElement('i'); i.style.background=`rgb(${c[0]},${c[1]},${c[2]})`; i.title=`#${c.map(v=>v.toString(16).padStart(2,'0')).join('')}`; box.appendChild(i); }
+  $('palInfo').textContent=`${P.cols.length} warna aktif${P.name?' · '+P.name:''}. Semua frame pakai warna yang sama ini.`;
+  $('savePal').hidden=false;
+}
+function savePalette(){
+  const P=PALETTES[$('palette').value]; if(!P) return;
+  const c=document.createElement('canvas'); c.width=P.cols.length; c.height=1;
+  const x=c.getContext('2d'); P.cols.forEach((col,i)=>{ x.fillStyle=`rgb(${col[0]},${col[1]},${col[2]})`; x.fillRect(i,0,1,1); });
+  c.toBlob(b=>{ const url=URL.createObjectURL(b); const a=document.createElement('a'); a.href=url;
+    a.download=`${(P.name||$('palette').value).replace(/[^\w-]+/g,'_')}_palette${P.cols.length}.png`;
+    document.body.appendChild(a); a.click(); a.remove(); setTimeout(()=>URL.revokeObjectURL(url),30000); },'image/png');
+}
+
+function outDims(s,W,H,w,h){
+  switch(s.outSize){
+    case 'orig': return [W,H];
+    case 'small': return [w,h];
+    case '1080': return [1920,1080];
+    case '720': return [1280,720];
+    default: return [s.outW,s.outH];
+  }
+}
+const work = document.createElement('canvas');
+function processFrame(src, s){
+  const W=src.width, H=src.height;
+  const w=Math.max(1,Math.round(W/s.px)), h=Math.max(1,Math.round(H/s.px));
+  work.width=w; work.height=h;
+  const wc=work.getContext('2d',{willReadFrequently:true});
+  wc.imageSmoothingEnabled=true; wc.imageSmoothingQuality='high';
+  wc.clearRect(0,0,w,h); wc.drawImage(src,0,0,w,h);
+  const img=wc.getImageData(0,0,w,h), d=img.data;
+  const Q=makeQuantizer(s);
+  const ch=Q.gray?1:3;
+  const buf=new Float32Array(w*h*ch), solid=new Uint8Array(w*h);
+  for(let i=0,p=0;i<w*h;i++,p+=4){
+    solid[i]= d[p+3]>=s.alpha ? 1 : 0;
+    let r=(d[p]-128)*s.contrast+128+s.bright, g=(d[p+1]-128)*s.contrast+128+s.bright, b=(d[p+2]-128)*s.contrast+128+s.bright;
+    if(Q.gray){ buf[i]=0.299*r+0.587*g+0.114*b; } else { buf[i*3]=r; buf[i*3+1]=g; buf[i*3+2]=b; }
+  }
+  const o=[0,0,0,0], amt=Q.step*s.strength;
+  const ordered=BAYER[s.algo];
+  const diffuse = s.algo==='floyd' ? [[1,0,7/16],[-1,1,3/16],[0,1,5/16],[1,1,1/16]]
+               : s.algo==='atkinson' ? [[1,0,1/8],[2,0,1/8],[-1,1,1/8],[0,1,1/8],[1,1,1/8],[0,2,1/8]] : null;
+  for(let y=0;y<h;y++) for(let x=0;x<w;x++){
+    const i=y*w+x, p=i*4;
+    if(!solid[i]){ d[p+3]=0; continue; }
+    let r,g,b;
+    if(Q.gray){ r=g=b=buf[i]; } else { r=buf[i*3]; g=buf[i*3+1]; b=buf[i*3+2]; }
+    if(ordered){ const t=ordered[y%ordered.length][x%ordered.length]*amt; r+=t; g+=t; b+=t; }
+    Q.q(r,g,b,o);
+    d[p]=o[0]; d[p+1]=o[1]; d[p+2]=o[2]; d[p+3]=255;
+    if(diffuse){
+      const k=s.strength;
+      const er = Q.gray ? (r-o[3])*k : (r-o[0])*k, eg=(g-o[1])*k, eb=(b-o[2])*k;
+      for(const [dx,dy,f] of diffuse){
+        const nx=x+dx, ny=y+dy; if(nx<0||nx>=w||ny>=h) continue;
+        const j=ny*w+nx; if(!solid[j]) continue;
+        if(Q.gray) buf[j]+=er*f; else { buf[j*3]+=er*f; buf[j*3+1]+=eg*f; buf[j*3+2]+=eb*f; }
+      }
+    }
+  }
+  wc.putImageData(img,0,0);
+  const out=document.createElement('canvas');
+  const [ow,oh]=outDims(s,W,H,w,h); out.width=ow; out.height=oh;
+  const oc=out.getContext('2d'); oc.imageSmoothingEnabled=false;
+  oc.drawImage(work,0,0,out.width,out.height);
+  return out;
+}
+
+/* ---------- frames ---------- */
+let files=[], current=0, cache=new Map();
+async function getBitmap(i){
+  if(cache.has(i)) return cache.get(i);
+  const bmp = files.length ? await createImageBitmap(files[i]) : sampleFrame(i);
+  if(cache.size>40){ const k=cache.keys().next().value; const b=cache.get(k); b.close&&b.close(); cache.delete(k); }
+  cache.set(i,bmp); return bmp;
+}
+function sampleFrame(i){
+  const c=document.createElement('canvas'); c.width=240; c.height=180;
+  const x=c.getContext('2d'); const t=i/24*Math.PI*2;
+  const g=x.createLinearGradient(0,0,240,180); g.addColorStop(0,'#3a6ea5'); g.addColorStop(1,'#f2d16b');
+  x.fillStyle=g; x.fillRect(0,0,240,180);
+  x.fillStyle='#2e8b57'; x.fillRect(0,130,240,50);
+  x.fillStyle='#e25b45'; x.beginPath(); x.arc(120+Math.sin(t)*60,90,34,0,Math.PI*2); x.fill();
+  x.fillStyle='#fff'; x.font='bold 22px monospace'; x.fillText('ABC 123',62,165);
+  return c;
+}
+const frameCount = () => files.length || 24;
+
+async function render(){
+  const s=settings(), i=current;
+  const src=await getBitmap(i);
+  const co=$('cOrig'); co.width=src.width; co.height=src.height;
+  co.getContext('2d').drawImage(src,0,0);
+  const out=processFrame(src,s);
+  const c=$('cOut'); c.width=out.width; c.height=out.height;
+  const sw=Math.max(1,Math.round(src.width/s.px)), sh=Math.max(1,Math.round(src.height/s.px));
+  $('sizeInfo').textContent=`Asli ${src.width}×${src.height} → pixel ${sw}×${sh} → hasil ${out.width}×${out.height}`;
+  c.getContext('2d').drawImage(out,0,0);
+  $('frameName').textContent = files.length ? `${i+1}/${files.length} · ${files[i].name}` : `contoh ${i+1}/24`;
+}
+let rq=false;
+function schedule(){ if(rq) return; rq=true; requestAnimationFrame(()=>{ rq=false; render(); }); }
+
+function setFiles(list){
+  let imgs=[...list].filter(f=>/^image\//.test(f.type) || /\.(png|jpe?g|webp|bmp|gif)$/i.test(f.name));
+  const pals=imgs.filter(f=>/palet/i.test(f.name));
+  if(pals.length){ loadPaletteFiles(pals); imgs=imgs.filter(f=>!/palet/i.test(f.name)); if(!imgs.length) return; }
+  if(!imgs.length){ $('countInfo').textContent='Tidak ada file gambar di situ.'; return; }
+  imgs.sort((a,b)=>a.name.localeCompare(b.name,undefined,{numeric:true,sensitivity:'base'}));
+  cache.forEach(b=>b.close&&b.close()); cache.clear();
+  files=imgs; current=0;
+  $('frameSlider').max=files.length-1; $('frameSlider').value=0;
+  $('countInfo').textContent=`${files.length} frame: ${files[0].name} … ${files[files.length-1].name}`;
+  $('rFrom').max=$('rTo').max=files.length; $('rFrom').value=1; $('rTo').value=files.length; updateRange();
+  $('saveFolder').disabled=false; $('saveZip').disabled=false; $('saveOne').disabled=false;
+  $('status').textContent='Siap. Atur efeknya, lalu simpan.';
+  schedule();
+}
+
+/* ---------- input wiring ---------- */
+const drop=$('drop');
+drop.addEventListener('click',()=>$('fileInput').click());
+drop.addEventListener('keydown',e=>{ if(e.key==='Enter'||e.key===' '){e.preventDefault();$('fileInput').click();} });
+$('fileInput').addEventListener('change',e=>setFiles(e.target.files));
+$('folderBtn').addEventListener('click',()=>$('folderInput').click());
+$('folderInput').addEventListener('change',e=>setFiles(e.target.files));
+['dragenter','dragover'].forEach(ev=>drop.addEventListener(ev,e=>{e.preventDefault();drop.classList.add('over');}));
+['dragleave','drop'].forEach(ev=>drop.addEventListener(ev,e=>{e.preventDefault();drop.classList.remove('over');}));
+drop.addEventListener('drop',e=>setFiles(e.dataTransfer.files));
+document.addEventListener('dragover',e=>e.preventDefault());
+document.addEventListener('drop',e=>{ e.preventDefault(); if(e.target!==drop && !drop.contains(e.target)) setFiles(e.dataTransfer.files); });
+
+$('preset').addEventListener('change',e=>{ applyPreset(e.target.value); schedule(); });
+for(const k of ctrls){ $(k).addEventListener('input',()=>{ $('preset').value='custom'; refreshLabels(); schedule(); }); }
+$('outSize').addEventListener('change',()=>{ $('customSize').hidden=$('outSize').value!=='custom'; schedule(); });
+['outW','outH'].forEach(id=>$(id).addEventListener('input',schedule));
+$('loadPal').addEventListener('click',()=>$('palInput').click());
+$('palInput').addEventListener('change',e=>{ loadPaletteFiles([...e.target.files]); e.target.value=''; });
+$('nCol').addEventListener('input',()=>{ $('nColVal').textContent=$('nCol').value; });
+$('extractBtn').addEventListener('click',extractFromCurrent);
+$('savePal').addEventListener('click',savePalette);
+$('frameSlider').addEventListener('input',e=>{ current=+e.target.value; schedule(); });
+
+/* ---------- range ---------- */
+function getRange(){
+  const n=frameCount();
+  let a=Math.round(+$('rFrom').value||1), b=Math.round(+$('rTo').value||n);
+  a=Math.min(Math.max(1,a),n); b=Math.min(Math.max(1,b),n);
+  if(a>b) [a,b]=[b,a];
+  return [a-1,b-1];
+}
+function updateRange(){
+  const [a,b]=getRange(), cnt=b-a+1;
+  const nm=i=>files.length?files[i].name:`contoh ${i+1}`;
+  $('rInfo').textContent=`${cnt} frame dipilih: ${nm(a)} sampai ${nm(b)}`;
+  $('saveFolder').textContent=`Simpan ${cnt} frame ke folder`;
+  $('saveZip').textContent=`Download ZIP (${cnt} frame)`;
+}
+$('setFrom').addEventListener('click',()=>{ $('rFrom').value=current+1; updateRange(); });
+$('setTo').addEventListener('click',()=>{ $('rTo').value=current+1; updateRange(); });
+$('rAll').addEventListener('click',()=>{ $('rFrom').value=1; $('rTo').value=frameCount(); updateRange(); });
+['rFrom','rTo'].forEach(id=>$(id).addEventListener('input',updateRange));
+['rFrom','rTo'].forEach(id=>$(id).addEventListener('change',()=>{ const [a,b]=getRange(); $('rFrom').value=a+1; $('rTo').value=b+1; updateRange(); if(current<a||current>b){ current=a; $('frameSlider').value=a; schedule(); } }));
+
+let playing=false, timer=null;
+$('playBtn').addEventListener('click',()=>{
+  playing=!playing; $('playBtn').textContent = playing ? '❚❚ Jeda' : '▶ Putar';
+  if(playing) tick(); else clearTimeout(timer);
+});
+async function tick(){
+  if(!playing) return;
+  const t0=performance.now();
+  const [ra,rb]=getRange();
+  current = (current<ra || current>=rb) ? ra : current+1;
+  $('frameSlider').max=frameCount()-1; $('frameSlider').value=current;
+  await render();
+  const fps=Math.min(60,Math.max(1,+$('fps').value||24));
+  timer=setTimeout(tick, Math.max(0,1000/fps-(performance.now()-t0)));
+}
+
+/* ---------- export ---------- */
+const crcTable=(()=>{const t=new Uint32Array(256);for(let n=0;n<256;n++){let c=n;for(let k=0;k<8;k++)c=c&1?0xEDB88320^(c>>>1):c>>>1;t[n]=c>>>0;}return t;})();
+function crc32(u8){let c=0xFFFFFFFF;for(let i=0;i<u8.length;i++)c=crcTable[(c^u8[i])&0xFF]^(c>>>8);return (c^0xFFFFFFFF)>>>0;}
+function zipBuilder(){
+  const parts=[], central=[]; let offset=0; const enc=new TextEncoder();
+  return {
+    add(name,data){
+      const nb=enc.encode(name), crc=crc32(data), sz=data.length;
+      const lh=new DataView(new ArrayBuffer(30));
+      lh.setUint32(0,0x04034b50,true); lh.setUint16(4,20,true); lh.setUint16(6,0x0800,true); lh.setUint16(8,0,true);
+      lh.setUint16(10,0,true); lh.setUint16(12,0x21,true); lh.setUint32(14,crc,true); lh.setUint32(18,sz,true); lh.setUint32(22,sz,true);
+      lh.setUint16(26,nb.length,true); lh.setUint16(28,0,true);
+      parts.push(lh.buffer,nb,data);
+      const ch=new DataView(new ArrayBuffer(46));
+      ch.setUint32(0,0x02014b50,true); ch.setUint16(4,20,true); ch.setUint16(6,20,true); ch.setUint16(8,0x0800,true); ch.setUint16(10,0,true);
+      ch.setUint16(12,0,true); ch.setUint16(14,0x21,true); ch.setUint32(16,crc,true); ch.setUint32(20,sz,true); ch.setUint32(24,sz,true);
+      ch.setUint16(28,nb.length,true); ch.setUint32(42,offset,true);
+      central.push(ch.buffer,nb);
+      offset+=30+nb.length+sz;
+    },
+    finish(count){
+      const cdSize=central.reduce((a,b)=>a+(b.byteLength),0);
+      const end=new DataView(new ArrayBuffer(22));
+      end.setUint32(0,0x06054b50,true); end.setUint16(8,count,true); end.setUint16(10,count,true);
+      end.setUint32(12,cdSize,true); end.setUint32(16,offset,true);
+      return new Blob([...parts,...central,end.buffer],{type:'application/zip'});
+    }
+  };
+}
+const outName = f => $('suffix').checked ? f.name.replace(/(\.[^.]+)?$/,'_dither.png') : f.name.replace(/\.[^.]+$/,'')+'.png';
+const toPng = c => new Promise(r=>c.toBlob(r,'image/png'));
+
+let cancelled=false;
+async function runExport(mode){
+  if(!files.length) return;
+  let dir=null;
+  if(mode==='folder'){
+    if(!window.showDirectoryPicker){ setStatus('Browser ini tidak bisa simpan ke folder. Pakai "Download ZIP".',true); return; }
+    try{ dir=await window.showDirectoryPicker({mode:'readwrite'}); }
+    catch(e){ if(e.name!=='AbortError') setStatus('Folder tidak bisa dibuka: '+e.message+'. Coba "Download ZIP".',true); return; }
+  }
+  if(playing) $('playBtn').click();
+  cancelled=false; busy(true);
+  const s=settings(), zip=mode==='zip'?zipBuilder():null, t0=performance.now();
+  const [ra,rb]=getRange(), total=rb-ra+1;
+  try{
+    for(let i=ra;i<=rb;i++){
+      if(cancelled){ setStatus(`Dibatalkan setelah ${i-ra} frame.`); busy(false); return; }
+      const bmp=await createImageBitmap(files[i]);
+      const out=processFrame(bmp,s); bmp.close&&bmp.close();
+      const blob=await toPng(out), name=outName(files[i]);
+      if(dir){ const fh=await dir.getFileHandle(name,{create:true}); const w=await fh.createWritable(); await w.write(blob); await w.close(); }
+      else zip.add(name,new Uint8Array(await blob.arrayBuffer()));
+      $('bar').style.width=((i-ra+1)/total*100)+'%';
+      setStatus(`Memproses ${i-ra+1}/${total} · ${name}`);
+    }
+    const sec=((performance.now()-t0)/1000).toFixed(1);
+    const rangeTxt=`frame ${ra+1}–${rb+1}`;
+    if(zip){
+      const pad=n=>String(n).padStart(4,'0');
+      const url=URL.createObjectURL(zip.finish(total));
+      const a=document.createElement('a'); a.href=url; a.download=`frames_dither_${pad(ra+1)}-${pad(rb+1)}.zip`; document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(()=>URL.revokeObjectURL(url),60000);
+      setStatus(`Selesai: ${rangeTxt} (${total} frame) dalam ${sec} detik. ZIP sedang diunduh.`);
+    } else setStatus(`Selesai: ${rangeTxt} (${total} frame) tersimpan di folder "${dir.name}" (${sec} detik).`);
+  }catch(e){ setStatus('Gagal: '+e.message,true); }
+  busy(false);
+}
+function busy(on){ $('saveFolder').disabled=on; $('saveZip').disabled=on; $('cancelBtn').hidden=!on; if(on) $('bar').style.width='0'; }
+function setStatus(t,err){ $('status').textContent=t; $('status').classList.toggle('err',!!err); }
+$('saveFolder').addEventListener('click',()=>runExport('folder'));
+$('saveZip').addEventListener('click',()=>runExport('zip'));
+$('cancelBtn').addEventListener('click',()=>{cancelled=true;});
+$('saveOne').addEventListener('click',async()=>{
+  const src=await getBitmap(current), out=processFrame(src,settings());
+  const blob=await toPng(out);
+  const name = files.length ? outName(files[current]) : `contoh_${current+1}_dither.png`;
+  const url=URL.createObjectURL(blob); const a=document.createElement('a'); a.href=url; a.download=name;
+  document.body.appendChild(a); a.click(); a.remove(); setTimeout(()=>URL.revokeObjectURL(url),30000);
+  setStatus(`Tersimpan: ${name} (${out.width}×${out.height})`);
+});
+if(!window.showDirectoryPicker) $('saveFolder').hidden=true;
+
+/* ---------- start ---------- */
+$('frameSlider').max=23;
+$('rFrom').max=$('rTo').max=24; $('rTo').value=24;
+applyPreset('baldi');
+updateRange();
+render();
+})();
+</script>
+</body>
+</html>
