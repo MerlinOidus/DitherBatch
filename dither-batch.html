@@ -131,8 +131,9 @@ canvas{max-width:100%;height:auto;image-rendering:pixelated;display:block}
     <div class="row" id="levelsRow"><div><span class="label">Tingkat warna / kanal</span><span class="val" id="levelsVal"></span></div>
       <input type="range" id="levels" min="2" max="8" step="1"></div>
 
-    <div class="row"><div><span class="label">Ukuran pixel</span><span class="val" id="pxVal"></span></div>
-      <input type="range" id="px" min="1" max="8" step="1"></div>
+    <div class="row"><div><span class="label">Resolusi pixel</span><span class="val" id="resVal"></span></div>
+      <input type="range" id="res" min="20" max="100" step="1" aria-label="Resolusi pixel dalam persen">
+      <div><span class="hint">20% = paling kotak</span><span class="hint">100% = tanpa pixel</span></div></div>
 
     <div class="row"><div><span class="label">Kekuatan dither</span><span class="val" id="strengthVal"></span></div>
       <input type="range" id="strength" min="0" max="1.5" step="0.05"></div>
@@ -162,6 +163,7 @@ canvas{max-width:100%;height:auto;image-rendering:pixelated;display:block}
       <label class="check" id="fitRow"><input type="checkbox" id="fit" checked> Jaga proporsi (tidak gepeng, sisanya transparan)</label>
       <div class="status" id="sizeInfo"></div>
     </div>
+    <label class="check"><input type="checkbox" id="trim"> Trim otomatis (buang pinggiran transparan)</label>
     <label class="check"><input type="checkbox" id="suffix"> Tambah "_dither" ke nama file</label>
   </aside>
 
@@ -209,10 +211,10 @@ const $ = id => document.getElementById(id);
 
 /* ---------- presets & palettes ---------- */
 const PRESETS = {
-  baldi:  {algo:'floyd',  palette:'levels', levels:4, px:2, strength:1,   bright:0, contrast:1.1, alpha:128},
-  mono:   {algo:'bayer4', palette:'mono',   levels:2, px:2, strength:1,   bright:0, contrast:1.2, alpha:128},
-  gb:     {algo:'bayer4', palette:'gb',     levels:4, px:3, strength:1,   bright:0, contrast:1.1, alpha:128},
-  soft:   {algo:'bayer8', palette:'levels', levels:6, px:1, strength:0.8, bright:0, contrast:1,   alpha:128},
+  baldi:  {algo:'floyd',  palette:'levels', levels:4, res:50,  strength:1,   bright:0, contrast:1.1, alpha:128},
+  mono:   {algo:'bayer4', palette:'mono',   levels:2, res:50,  strength:1,   bright:0, contrast:1.2, alpha:128},
+  gb:     {algo:'bayer4', palette:'gb',     levels:4, res:33,  strength:1,   bright:0, contrast:1.1, alpha:128},
+  soft:   {algo:'bayer8', palette:'levels', levels:6, res:100, strength:0.8, bright:0, contrast:1,   alpha:128},
 };
 const hex = s => [parseInt(s.slice(0,2),16),parseInt(s.slice(2,4),16),parseInt(s.slice(4,6),16)];
 const PALETTES = {
@@ -223,9 +225,15 @@ const PALETTES = {
   pico:  {gray:false,step:70,  cols:['000000','1d2b53','7e2553','008751','ab5236','5f574f','c2c3c7','fff1e8','ff004d','ffa300','ffec27','00e436','29adff','83769c','ff77a8','ffccaa'].map(hex)},
 };
 
-const ctrls = ['algo','palette','levels','px','strength','bright','contrast','alpha'];
+const ctrls = ['algo','palette','levels','res','strength','bright','contrast','alpha'];
+let lastSize=[240,180];
+function refreshResLabel(){
+  const r=+$('res').value;
+  const w=Math.max(1,Math.round(lastSize[0]*r/100)), h=Math.max(1,Math.round(lastSize[1]*r/100));
+  $('resVal').textContent=`${r}% · ${w}×${h}`;
+}
 function settings(){
-  return {algo:$('algo').value, palette:$('palette').value, levels:+$('levels').value, px:+$('px').value,
+  return {algo:$('algo').value, palette:$('palette').value, levels:+$('levels').value, res:Math.min(100,Math.max(20,+$('res').value||100)), trim:$('trim').checked,
     strength:+$('strength').value, bright:+$('bright').value, contrast:+$('contrast').value, alpha:+$('alpha').value,
     fit:$('fit').checked, outSize:$('outSize').value, outW:Math.max(1,+$('outW').value||1920), outH:Math.max(1,+$('outH').value||1080)};
 }
@@ -236,7 +244,7 @@ function applyPreset(name){
 }
 function refreshLabels(){
   $('levelsVal').textContent = $('levels').value;
-  $('pxVal').textContent = $('px').value + ' px';
+  refreshResLabel();
   $('strengthVal').textContent = Math.round($('strength').value*100) + '%';
   $('brightVal').textContent = $('bright').value;
   $('contrastVal').textContent = (+$('contrast').value).toFixed(2) + '×';
@@ -415,10 +423,49 @@ function outDims(s,W,H,w,h){
     default: return [s.outW,s.outH];
   }
 }
+// where the small (pixelated) image lands inside the output canvas
+function layout(s,W,H){
+  const w=Math.max(1,Math.round(W*s.res/100)), h=Math.max(1,Math.round(H*s.res/100));
+  const [ow,oh]=outDims(s,W,H,w,h);
+  let dw=ow, dh=oh, ox=0, oy=0;
+  if(s.fit && s.outSize!=='orig' && s.outSize!=='small'){
+    const sc=Math.min(ow/w,oh/h); dw=Math.round(w*sc); dh=Math.round(h*sc);
+    ox=Math.round((ow-dw)/2); oy=Math.round((oh-dh)/2);
+  }
+  return {w,h,ow,oh,dw,dh,ox,oy};
+}
+// bounding box of solid pixels (small-image coords) -> output-canvas rect
+function boxToOut(L,b){
+  if(!b) return null;
+  const x0=Math.floor(L.ox+b[0]*L.dw/L.w), y0=Math.floor(L.oy+b[1]*L.dh/L.h);
+  const x1=Math.ceil(L.ox+(b[2]+1)*L.dw/L.w), y1=Math.ceil(L.oy+(b[3]+1)*L.dh/L.h);
+  return [Math.max(0,x0),Math.max(0,y0),Math.min(L.ow,x1),Math.min(L.oh,y1)];
+}
+function unionRect(a,b){ if(!a) return b; if(!b) return a; return [Math.min(a[0],b[0]),Math.min(a[1],b[1]),Math.max(a[2],b[2]),Math.max(a[3],b[3])]; }
+function cropCanvas(c,r){
+  if(!r) return c;
+  const x0=Math.max(0,r[0]), y0=Math.max(0,r[1]), x1=Math.min(c.width,r[2]), y1=Math.min(c.height,r[3]);
+  if(x1<=x0||y1<=y0) return c;
+  const o=document.createElement('canvas'); o.width=x1-x0; o.height=y1-y0;
+  o.getContext('2d').drawImage(c,x0,y0,o.width,o.height,0,0,o.width,o.height);
+  return o;
+}
+// quick pass: only measures where the visible pixels are (used to trim many frames with one shared box)
+function measureFrame(src,s){
+  const L=layout(s,src.width,src.height);
+  work.width=L.w; work.height=L.h;
+  const wc=work.getContext('2d',{willReadFrequently:true});
+  wc.imageSmoothingEnabled=true; wc.imageSmoothingQuality='high';
+  wc.clearRect(0,0,L.w,L.h); wc.drawImage(src,0,0,L.w,L.h);
+  const d=wc.getImageData(0,0,L.w,L.h).data;
+  let x0=1e9,y0=1e9,x1=-1,y1=-1;
+  for(let y=0;y<L.h;y++) for(let x=0;x<L.w;x++) if(d[(y*L.w+x)*4+3]>=s.alpha){ if(x<x0)x0=x; if(x>x1)x1=x; if(y<y0)y0=y; if(y>y1)y1=y; }
+  return boxToOut(L, x1<0?null:[x0,y0,x1,y1]);
+}
 const work = document.createElement('canvas');
 function processFrame(src, s){
   const W=src.width, H=src.height;
-  const w=Math.max(1,Math.round(W/s.px)), h=Math.max(1,Math.round(H/s.px));
+  const L=layout(s,W,H), w=L.w, h=L.h;
   work.width=w; work.height=h;
   const wc=work.getContext('2d',{willReadFrequently:true});
   wc.imageSmoothingEnabled=true; wc.imageSmoothingQuality='high';
@@ -455,13 +502,13 @@ function processFrame(src, s){
     }
   }
   wc.putImageData(img,0,0);
+  let bx0=1e9,by0=1e9,bx1=-1,by1=-1;
+  for(let y=0;y<h;y++) for(let x=0;x<w;x++) if(solid[y*w+x]){ if(x<bx0)bx0=x; if(x>bx1)bx1=x; if(y<by0)by0=y; if(y>by1)by1=y; }
   const out=document.createElement('canvas');
-  const [ow,oh]=outDims(s,W,H,w,h); out.width=ow; out.height=oh;
+  out.width=L.ow; out.height=L.oh;
   const oc=out.getContext('2d'); oc.imageSmoothingEnabled=false;
-  if(s.fit && s.outSize!=='orig' && s.outSize!=='small'){
-    const sc=Math.min(ow/w,oh/h), dw=Math.round(w*sc), dh=Math.round(h*sc);
-    oc.drawImage(work,Math.round((ow-dw)/2),Math.round((oh-dh)/2),dw,dh);
-  } else oc.drawImage(work,0,0,ow,oh);
+  oc.drawImage(work,L.ox,L.oy,L.dw,L.dh);
+  out.trimRect=boxToOut(L, bx1<0?null:[bx0,by0,bx1,by1]);
   return out;
 }
 
@@ -490,10 +537,13 @@ async function render(){
   const src=await getBitmap(i);
   const co=$('cOrig'); co.width=src.width; co.height=src.height;
   co.getContext('2d').drawImage(src,0,0);
-  const out=processFrame(src,s);
+  lastSize=[src.width,src.height]; refreshResLabel();
+  const full=processFrame(src,s);
+  const out = s.trim ? cropCanvas(full, full.trimRect) : full;
   const c=$('cOut'); c.width=out.width; c.height=out.height;
-  const sw=Math.max(1,Math.round(src.width/s.px)), sh=Math.max(1,Math.round(src.height/s.px));
-  $('sizeInfo').textContent=`Asli ${src.width}×${src.height} → pixel ${sw}×${sh} → hasil ${out.width}×${out.height}`;
+  const L=layout(s,src.width,src.height);
+  $('sizeInfo').textContent=`Asli ${src.width}×${src.height} → pixel ${L.w}×${L.h} → hasil ${full.width}×${full.height}`
+    + (s.trim ? ` → trim ${out.width}×${out.height}` : '');
   c.getContext('2d').drawImage(out,0,0);
   $('frameName').textContent = files.length ? `${i+1}/${files.length} · ${files[i].name}` : `contoh ${i+1}/24`;
 }
@@ -534,6 +584,7 @@ for(const k of ctrls){ $(k).addEventListener('input',()=>{ $('preset').value='cu
 function syncSizeUi(){ const v=$('outSize').value; $('customSize').hidden=v!=='custom'; $('fitRow').hidden=(v==='orig'||v==='small'); }
 $('outSize').addEventListener('change',()=>{ syncSizeUi(); schedule(); });
 $('fit').addEventListener('change',schedule);
+$('trim').addEventListener('change',schedule);
 syncSizeUi();
 ['outW','outH'].forEach(id=>$(id).addEventListener('input',schedule));
 $('loadPal').addEventListener('click',()=>$('palInput').click());
@@ -626,10 +677,23 @@ async function runExport(mode){
   const s=settings(), zip=mode==='zip'?zipBuilder():null, t0=performance.now();
   const [ra,rb]=getRange(), total=rb-ra+1;
   try{
+    // trim: measure every frame first so all frames share one crop box (animation stays aligned)
+    let box=null;
+    if(s.trim){
+      for(let i=ra;i<=rb;i++){
+        if(cancelled){ setStatus('Dibatalkan.'); busy(false); return; }
+        const bmp=await createImageBitmap(files[i]);
+        box=unionRect(box, measureFrame(bmp,s)); bmp.close&&bmp.close();
+        $('bar').style.width=((i-ra+1)/total*100)+'%';
+        setStatus(`Mengukur area untuk trim ${i-ra+1}/${total}`);
+      }
+      $('bar').style.width='0';
+    }
     for(let i=ra;i<=rb;i++){
       if(cancelled){ setStatus(`Dibatalkan setelah ${i-ra} frame.`); busy(false); return; }
       const bmp=await createImageBitmap(files[i]);
-      const out=processFrame(bmp,s); bmp.close&&bmp.close();
+      let out=processFrame(bmp,s); bmp.close&&bmp.close();
+      if(box) out=cropCanvas(out,box);
       const blob=await toPng(out), name=outName(files[i]);
       if(dir){ const fh=await dir.getFileHandle(name,{create:true}); const w=await fh.createWritable(); await w.write(blob); await w.close(); }
       else zip.add(name,new Uint8Array(await blob.arrayBuffer()));
@@ -637,7 +701,7 @@ async function runExport(mode){
       setStatus(`Memproses ${i-ra+1}/${total} · ${name}`);
     }
     const sec=((performance.now()-t0)/1000).toFixed(1);
-    const rangeTxt=`frame ${ra+1}–${rb+1}`;
+    const rangeTxt=`frame ${ra+1}–${rb+1}` + (box?`, di-trim jadi ${box[2]-box[0]}×${box[3]-box[1]}`:'');
     if(zip){
       const pad=n=>String(n).padStart(4,'0');
       const url=URL.createObjectURL(zip.finish(total));
@@ -654,7 +718,9 @@ $('saveFolder').addEventListener('click',()=>runExport('folder'));
 $('saveZip').addEventListener('click',()=>runExport('zip'));
 $('cancelBtn').addEventListener('click',()=>{cancelled=true;});
 $('saveOne').addEventListener('click',async()=>{
-  const src=await getBitmap(current), out=processFrame(src,settings());
+  const s=settings(), src=await getBitmap(current);
+  let out=processFrame(src,s);
+  if(s.trim) out=cropCanvas(out,out.trimRect);
   const blob=await toPng(out);
   const name = files.length ? outName(files[current]) : `contoh_${current+1}_dither.png`;
   const url=URL.createObjectURL(blob); const a=document.createElement('a'); a.href=url; a.download=name;
